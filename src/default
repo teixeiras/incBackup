@@ -5,4 +5,8 @@ BACKUP_UUID_DISK="f00ace5e-ed9c-45bd-b064-7b5b46779615"
 # Directories being ignored split by ;
 EXCLUSIONS="/autofs/;/home/grey/pCloudDrive/;/dev/;/proc/;/sys/;/tmp/;/run/;/mnt/;/media/;/lost+found/"
 
-BACKUP_FREQUENCY="* * * * *" 
+# Backup creation frequency (cron format)
+BACKUP_FREQUENCY="0 0 * * *"
+
+# Number of days until a backup is removed
+REMOVE_BACKUPS_OLDERS="30"

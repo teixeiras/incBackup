@@ -16,35 +16,42 @@ if [ ! -f "$SHARE_PATH/nextUpdate.py" ]; then
 	SHARE_PATH=/usr/share/incBackup  
 fi
 
+# Path used to keep with last update date file
+# To force a backip, just delete the file create 
+# inside this folder
 VAR_DIRECTORY="/var/lib/incBackup"
 if [ ! -d $VAR_DIRECTORY ] 
 then
 	mkdir -p $VAR_DIRECTORY
 fi
 
+# Centralized log system to journactl
+# Just change here if you want redirects the logs to a file
 function log(){
 	echo $1 | systemd-cat -t incBackup -p info
 }
 
-
-
+# Helper to check if file is a hard link,
+# Used to check if the media filesystem has support to it
 function is-hardlinked() {
 	[ "`stat -c '%i' $1`" != "`stat -c '%i' $2`" ] && echo 0
 	echo 1
 }
 
 pipe=/tmp/incBackupPipe
-# Create check of there is any running instance, if so,
-# shutdown instance with exit 1
-
+# When the script is launched by a none root user,
+# it will only print the pipe content with state information
 if (( $EUID != 0 )); then
-    	if read line <$pipe; then
+    	
+	if read line <$pipe; then
        		echo $line
 		exit 0
     	fi
  
 fi
 
+# Create check of there is any running instance, if so,
+# shutdown instance with exit 1
 pidfile=/var/run/incBackup.pid
 if [ -e $pidfile ]; then
     pid=`cat $pidfile`
@@ -57,10 +64,12 @@ if [ -e $pidfile ]; then
         rm $pidfile
     fi
 fi
+
 if [[ ! -p $pipe ]]; then
     mkfifo $pipe
 fi
 sudo chmod a+r $pipe
+cat <$pipe &
 
 trap "rm -f -- '$pidfile' & rm -f $pipe" EXIT
 echo $$ > $pidfile
@@ -85,6 +94,22 @@ if [ -z "BACKUP_FREQUENCY" ]; then
 	exit 1
 fi
 
+STATE="NOT RUNNING"
+STATE_CODE="0"
+		
+# Method to create an formatted input to
+# clients
+#
+#STATUS CODE:
+# 0 - No operation running
+# 1 - Backup is execution
+# 2 - Last Backup failed 
+# 3 - Failed mounting partion 
+# 4 - Disk is not connected
+# 5 - Disk requires to be formatted with a valid filesystem
+function stateInformation() {
+	echo "STATECODE:$STATE_CODE;STATE:$STATE;" >$pipe
+}
 
 while true; do
 	sleep 5s
@@ -95,38 +120,60 @@ while true; do
 		LAST_OPERATION=$(cat $VAR_DIRECTORY/last)
 	fi
 
-	echo "not running" >$pipe
-	
+	stateInformation
+
 	NOW=$(date +%s)
 	NEXT_RUN=$( python2 "$SHARE_PATH/nextUpdate.py" "$BACKUP_FREQUENCY" "$LAST_OPERATION" )
 	if (( $NEXT_RUN > $NOW )); then
 		continue;
 	fi
 
+	CONNECTED=$( lsblk -o UUID,MOUNTPOINT | grep "$BACKUP_UUID_DISK" )
+	if [ -z "CONNECTED" ]; then
+		STATE="DISK NOT PRESENT"
+		STATE_CODE="4"
+		continue 	
+	fi
+	MOUNTED_BY_SCRIPT="0"
+
+
 	# Check if the disk is mounted and if it has hardlink permission
 	MOUNTPOINT=$(lsblk -o UUID,MOUNTPOINT | awk -v u="$BACKUP_UUID_DISK" '$1 == u {print $2}')
-	echo $MOUNTPOINT
-	if [[ -n $MOUNTPOINT ]]
+	if [[ ! -n $MOUNTPOINT ]]
 	then
-	    TEST_FILE="$MOUNTPOINT/adasdsadasdsad.asdasd"
-	    DEST_TEST_FILE="$MOUNTPOINT/adasdsadasdsad.asdasdiasd"
+		MOUNTPOINT=$(mktemp -d)
+		mount "UUID=$BACKUP_UUID_DISK" $MOUNTPOINT
+		if [ "$?" -ne "0" ]; then
+			log "Could not mount $BACKUP_UUID_DISK"
+			STATE="FAILED MOUNTING FILESYSTEM"
+			STATE_CODE="3"
+			continue
+		else 
+			MOUNTED_BY_SCRIPT="1"
 
-	   touch $TEST_FILE
-	   ln $TEST_FILE $DEST_TEST_FILE
-	   result=$( is-hardlinked "$TEST_FILE" "$DEST_TEST_FILE" )
-	   if [ "$result" -eq "0" ]; then
-		log "Filesystem do not have support hardlinks, format for example to ext4"
-		exit 1
-	   fi
-	   rm "$TEST_FILE"
-	   rm "$DEST_TEST_FILE"
-	   unset TEST_FILE
-	   unset DEST_TEST_FILE
-	else
-
-	    #log "$BACKUP_UUID_DISK is not mounted"
-	    continue 
+		fi
 	fi
+
+
+
+	TEST_FILE="$MOUNTPOINT/adasdsadasdsad.asdasd"
+	DEST_TEST_FILE="$MOUNTPOINT/adasdsadasdsad.asdasdiasd"
+	touch $TEST_FILE
+	ln $TEST_FILE $DEST_TEST_FILE
+	result=$( is-hardlinked "$TEST_FILE" "$DEST_TEST_FILE" )
+	if [ "$result" -eq "0" ]; then
+		log "Filesystem do not have support hardlinks, format for example to ext4"
+		STATE="INVALID FILESYSTEM"
+		STATE_CODE="5"
+	
+		continue 
+	fi
+	rm "$TEST_FILE"
+	rm "$DEST_TEST_FILE"
+	unset TEST_FILE
+	unset DEST_TEST_FILE
+
+
 
 	DESTINATION="$MOUNTPOINT"
 	NEW_TIME=$(date +%Y-%m-%d_%H-%M-%S)
@@ -153,20 +200,49 @@ while true; do
 	
 	# Keep dbus updated with the state
 	while kill -0 $pid 2> /dev/null; do
-		echo "running" > $pipe
+		STATE_CODE="1"
+		STATE="RUNNING"
+		stateInformation
 		sleep 1
 	done
 	
 	wait $pid
-
+	# On success, marks the new current as the last backup
 	if [ "$?" -eq "0"]; then
 		echo $NOW > $VAR_DIRECTORY/last
+		rm -f $DESTINATION/current
+		ln -s $DESTINATION/back-$NEW_TIME $DESTINATION/current
+		STATE_CODE="0"
+		STATE="NOT RUNNING"
+	else
+		STATE_CODE="2"
+		STATE="Last backup failed: rsync error: $?"
 	fi
 
+	# Re-set trap without rsync kill
 	trap "rm -f -- '$pidfile' & rm -f $pipe" EXIT
+	
+	# Clean older backups
+	if [ ! -z "$REMOVE_BACKUPS_OLDERS" ]; then 
+		BACKUP_MIN_DATE=$(date -d "-$REMOVE_BACKUPS_OLDERS days" +"%s")
+		echo $BACKUP_MIN_DATE
+		for d in $MOUNTPOINT/*/ ; do
+			date=$(echo $d | egrep -o "20[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}")
+			if [ ! -z "$date" ]; then
+				IFS="_:-" read Y M D h m s <<<"$date"
+				CREATION_DATE=$(date -d "$M/$D/$Y $h:$m:$s" +"%s")
+				if (( $BACKUP_MIN_DATE > $CREATION_DATE )); then
+					 rm -rf $d
+				fi
+			fi
+	
+		done
+	fi
 
-	rm -f $DESTINATION/current
-	ln -s $DESTINATION/back-$NEW_TIME $DESTINATION/current
-
-
+	# If the mount was made by script, since we don't need it anymore
+	# we will umount it
+	if [ "$MOUNTED_BY_SCRIPT" -eq "1" ]; then
+		umount $MOUNTPOINT
+	fi
+	
 done
