@@ -1,1 +1,8 @@
-/etc/systemd/system/incBackup.service
+[Unit]
+Description=Incremental Backup
+
+[Service]
+ExecStart=backup
+
+[Install]
+WantedBy=multi-user.target 

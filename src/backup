@@ -1,1 +1,172 @@
-/usr/local/bin/backup
+#!/usr/bin/bash
+#############################################################
+#                                                           #
+#                   Backup tool				    #
+#                                                           #
+#  You need to install croniter, using pip install croniter #
+#  as root                                                  #
+#                                                           #
+#  Filipe Teixeira - 2019 - teixeiras@gmail.com             #
+#############################################################
+
+
+# Discover the path from the utilities
+SHARE_PATH=/usr/local/share/incBackup
+if [ ! -f "$SHARE_PATH/nextUpdate.py" ]; then
+	SHARE_PATH=/usr/share/incBackup  
+fi
+
+VAR_DIRECTORY="/var/lib/incBackup"
+if [ ! -d $VAR_DIRECTORY ] 
+then
+	mkdir -p $VAR_DIRECTORY
+fi
+
+function log(){
+	echo $1 | systemd-cat -t incBackup -p info
+}
+
+
+
+function is-hardlinked() {
+	[ "`stat -c '%i' $1`" != "`stat -c '%i' $2`" ] && echo 0
+	echo 1
+}
+
+pipe=/tmp/incBackupPipe
+# Create check of there is any running instance, if so,
+# shutdown instance with exit 1
+
+if (( $EUID != 0 )); then
+    	if read line <$pipe; then
+       		echo $line
+		exit 0
+    	fi
+ 
+fi
+
+pidfile=/var/run/incBackup.pid
+if [ -e $pidfile ]; then
+    pid=`cat $pidfile`
+    if kill -0 &>1 > /dev/null $pid; then
+    	if read line <$pipe; then
+        	echo $line
+		exit 0
+    	fi
+    else
+        rm $pidfile
+    fi
+fi
+if [[ ! -p $pipe ]]; then
+    mkfifo $pipe
+fi
+sudo chmod a+r $pipe
+
+trap "rm -f -- '$pidfile' & rm -f $pipe" EXIT
+echo $$ > $pidfile
+
+
+# Initialize all the CONFIG variables as empty
+BACKUP_UUID_DISK=""
+EXCLUSIONS=""
+BACKUP_FREQUENCY="" 
+# Load all the settings from incBack default config
+if test -f /etc/default/incBackup ; then
+	. /etc/default/incBackup
+fi
+
+if [ -z "BACKUP_UUID_DISK" ]; then 
+	log "BACKUP_UUID_DISK is not setted"
+	exit 1
+fi
+
+if [ -z "BACKUP_FREQUENCY" ]; then 
+	log "BACKUP_FREQUENCY is not setted"
+	exit 1
+fi
+
+
+while true; do
+	sleep 5s
+	if [ ! -f "$VAR_DIRECTORY/last" ]; then
+		LAST_OPERATION=0
+		log "First backup.... this will take some time"
+	else
+		LAST_OPERATION=$(cat $VAR_DIRECTORY/last)
+	fi
+
+	echo "not running" >$pipe
+	
+	NOW=$(date +%s)
+	NEXT_RUN=$( python2 "$SHARE_PATH/nextUpdate.py" "$BACKUP_FREQUENCY" "$LAST_OPERATION" )
+	if (( $NEXT_RUN > $NOW )); then
+		continue;
+	fi
+
+	# Check if the disk is mounted and if it has hardlink permission
+	MOUNTPOINT=$(lsblk -o UUID,MOUNTPOINT | awk -v u="$BACKUP_UUID_DISK" '$1 == u {print $2}')
+	echo $MOUNTPOINT
+	if [[ -n $MOUNTPOINT ]]
+	then
+	    TEST_FILE="$MOUNTPOINT/adasdsadasdsad.asdasd"
+	    DEST_TEST_FILE="$MOUNTPOINT/adasdsadasdsad.asdasdiasd"
+
+	   touch $TEST_FILE
+	   ln $TEST_FILE $DEST_TEST_FILE
+	   result=$( is-hardlinked "$TEST_FILE" "$DEST_TEST_FILE" )
+	   if [ "$result" -eq "0" ]; then
+		log "Filesystem do not have support hardlinks, format for example to ext4"
+		exit 1
+	   fi
+	   rm "$TEST_FILE"
+	   rm "$DEST_TEST_FILE"
+	   unset TEST_FILE
+	   unset DEST_TEST_FILE
+	else
+
+	    #log "$BACKUP_UUID_DISK is not mounted"
+	    continue 
+	fi
+
+	DESTINATION="$MOUNTPOINT"
+	NEW_TIME=$(date +%Y-%m-%d_%H-%M-%S)
+
+	PARAM=" -aPv \
+	  --link-dest=\"$DESTINATION/current\" \
+	  --delete --delete-excluded"
+
+	PARAM="$PARAM --progress"
+	for i in $(echo $EXCLUSIONS | sed "s/;/ /g"); do
+	    PARAM="$PARAM --exclude=\"$i\" "
+	done
+
+	COMMAND="rsync $PARAM / \"$DESTINATION/back-$NEW_TIME\""
+	echo $COMMAND
+	eval $COMMAND &
+	pid=$!
+
+	# Low priority 
+	renice 10 -p $pid
+
+	# If this script is killed, kill the rsync.
+	trap "rm -f -- '$pidfile' & kill $pid 2> /dev/null & rm -f $pipe" EXIT
+	
+	# Keep dbus updated with the state
+	while kill -0 $pid 2> /dev/null; do
+		echo "running" > $pipe
+		sleep 1
+	done
+	
+	wait $pid
+
+	if [ "$?" -eq "0"]; then
+		echo $NOW > $VAR_DIRECTORY/last
+	fi
+
+	trap "rm -f -- '$pidfile' & rm -f $pipe" EXIT
+
+	rm -f $DESTINATION/current
+	ln -s $DESTINATION/back-$NEW_TIME $DESTINATION/current
+
+
+done
