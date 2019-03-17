@@ -208,7 +208,7 @@ while true; do
 	
 	wait $pid
 	# On success, marks the new current as the last backup
-	if [ "$?" -eq "0"]; then
+	if [ "$?" -ne "0"]; then
 		echo $NOW > $VAR_DIRECTORY/last
 		rm -f $DESTINATION/current
 		ln -s $DESTINATION/back-$NEW_TIME $DESTINATION/current
