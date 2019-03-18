@@ -13,12 +13,13 @@ pipe=/tmp/incBackupPipe
 # When the script is launched by a none root user,
 # it will only print the pipe content with state information
 if (( $EUID != 0 )); then
-    	
-	if read line <$pipe; then
+
+
+	if read -t 30 line <$pipe; then
        		echo $line
 		exit 0
     	fi
- 
+	exit 0 
 fi
 
 
@@ -65,9 +66,9 @@ if [ -e $pidfile ]; then
     fi
 fi
 
-if [[ ! -p $pipe ]]; then
-    mkfifo $pipe
-fi
+rm -r $pipe
+mkfifo $pipe
+
 sudo chmod a+r $pipe
 cat <$pipe &
 
@@ -113,30 +114,30 @@ function stateInformation() {
 }
 
 while true; do
-	sleep 5s
+	sleep 20s
 	if [ ! -f "$VAR_DIRECTORY/last" ]; then
 		LAST_OPERATION=0
 		log "First backup.... this will take some time"
 	else
 		LAST_OPERATION=$(cat $VAR_DIRECTORY/last)
 	fi
+	NOW=$(date +%s)
+	NEXT_UPDATE=$( python2 "$SHARE_PATH/nextUpdate.py" "$BACKUP_FREQUENCY" "$NOW" )
+	CONNECTED=$( lsblk -o UUID,MOUNTPOINT | grep "$BACKUP_UUID_DISK" )
+	if [ -z "$CONNECTED" ]; then
+		STATE="DISK NOT PRESENT"
+		STATE_CODE="4"
+		stateInformation
+		continue 	
+	fi
 
 	stateInformation
 
-	NOW=$(date +%s)
 	NEXT_RUN=$( python2 "$SHARE_PATH/nextUpdate.py" "$BACKUP_FREQUENCY" "$LAST_OPERATION" )
-	NEXT_UPDATE=$( python2 "$SHARE_PATH/nextUpdate.py" "$BACKUP_FREQUENCY" "$NOW" )
-	echo $LAST_OPERATION - $NEXT_RUN - $NOW
 	if (( $NEXT_RUN > $NOW )); then
 		continue;
 	fi
 
-	CONNECTED=$( lsblk -o UUID,MOUNTPOINT | grep "$BACKUP_UUID_DISK" )
-	if [ -z "CONNECTED" ]; then
-		STATE="DISK NOT PRESENT"
-		STATE_CODE="4"
-		continue 	
-	fi
 	MOUNTED_BY_SCRIPT="0"
 
 
@@ -199,7 +200,7 @@ while true; do
 	    PARAM="$PARAM --exclude=\"$i\" "
 	done
 
-	COMMAND="rsync $PARAM /etc \"$INCOMPLETE_DIR\""
+	COMMAND="rsync $PARAM / \"$INCOMPLETE_DIR\""
 	echo $COMMAND
 	eval $COMMAND &
 	pid=$!
