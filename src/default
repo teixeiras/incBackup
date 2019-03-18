@@ -1,6 +1,6 @@
 #!/bin/bash
 # UUID from disk where the backup will be done
-BACKUP_UUID_DISK="5c12ace1-9d3d-4bcf-83bd-a3a2629e71ee"
+BACKUP_UUID_DISK="b474b9ba-1bbe-4265-931a-c6174b15add1"
 
 # Directories being ignored split by ;
 EXCLUSIONS="/autofs/;/home/grey/pCloudDrive/;/dev/;/proc/;/sys/;/tmp/;/run/;/mnt/;/media/;/lost+found/"
