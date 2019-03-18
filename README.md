@@ -9,14 +9,10 @@ There is several backups systems, but none could:
 * Backup All system (Not only home)
 * Start with the system (Systemd script and logs)
 * Retrieve status
-
-## TODO
-The application it's in a very early stage of development, missing features :
 * Delete backups when customized time elapsed
 * Mount the disk when present
 
 This application it's made to keep simple, with only a single job.
-
 
 # Usage
 
@@ -27,6 +23,23 @@ systemctl enable/start incBackup
 The logs can be checked at journactl.
 
 if you run the script twice, it will return the operation status and exit. This behaviour can be used to retrieve application status for example to i3 (or connect directly to the pipe).
+
+```bash
+#!/bin/sh
+if [ "$(pgrep -x backup)" ]; then
+    temp=$(backup | cut -d ";" -f 1| cut -d ":" -f2)
+
+    if [ "$temp" = "1" ]; then
+        echo -e "%{F#00FF00} "
+    elif [ "$temp" = "0" ]; then
+        echo "%{F##C0C0C0} "
+    elif [ "$temp" = "4" ]; then
+	echo ""
+    else
+        echo "%{F#FF0000} "
+    fi
+fi
+```
 
 # Installing
 ## Dependencies
