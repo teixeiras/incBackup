@@ -1,4 +1,5 @@
-# Rename to PKGBUILD to build via makepkg
+# Maintainer: Filipe Teixeira <address at domain dot tld>
+
 _pkgname=incBackup
 pkgname=$_pkgname-git
 pkgver=v1.0.0
@@ -23,7 +24,8 @@ pkgver() {
 }
 
 build() {
-  #nothing to build
+  # nothing to build
+  echo "Bash script" 
 }
 
 package() {
