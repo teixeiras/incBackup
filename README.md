@@ -8,7 +8,7 @@ There is several backups systems, but none could:
 * Easily scheduded
 * Backup All system (Not only home)
 * Start with the system (Systemd script and logs)
-* Retrieve status
+* Retrieve status from pipe
 * Delete backups when customized time elapsed
 * Mount the disk when present
 
