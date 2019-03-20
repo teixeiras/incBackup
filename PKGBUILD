@@ -1,17 +1,34 @@
-pkgname="sed"
-pkgver=4.4
+# Rename to PKGBUILD to build via makepkg
+_pkgname=incBackup
+pkgname=$_pkgname-git
+pkgver=v1.0.0
 pkgrel=1
-pkgdesc="SED the stream editor"
-arch=("x86_64")
-license=('GPL')
-source=("")
+pkgdesc="Simple bash script to make incremental backups to external driver"
+arch=('i686' 'x86_64')
+url="https://github.com/teixeiras/incBackup"
+license=('MIT')
+groups=()
+depends=()
+makedepends=('python-croniter')
+optdepends=('')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+backup=("etc/$_pkgname/$_pkgname.conf")
+source=("$_pkgname::git+https://github.com/teixeiras/incBackup")
+md5sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/$_pkgname"
+  git describe --tags | sed 's|-|.|g'
+}
+
 build() {
-        cd "$pkgname-${pkgver}"
-        ./configure --prefix=/usr
-        make
+  #nothing to build
 }
 
 package() {
-        cd "$pkgname-${pkgver}"
-        make DESTDIR="$pkgdir" install
+  cd "$srcdir/$_pkgname"
+  make install PREFIX="$pkgdir/usr" 
 }
+
+# vim:set ts=2 sw=2 et:
