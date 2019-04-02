@@ -8,13 +8,16 @@ There is several backups systems, but none could:
 * Easily scheduded
 * Backup All system (Not only home)
 * Start with the system (Systemd script and logs)
-* Retrieve status
+* Retrieve status from pipe
 * Delete backups when customized time elapsed
 * Mount the disk when present
 
 This application it's made to keep simple, with only a single job.
 
 # Usage
+After installing edit /etc/default/incBackup:
+* set the right UUID (you can check it with blkid command) from the disk where the backups will be copied. The disk filesystem must support hard links (ntfs, fat, fat32) are not support.
+
 
 You can start the application with:
 
